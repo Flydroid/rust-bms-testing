@@ -1,0 +1,20 @@
+[package]
+name = "rust-bms"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "rust-bms"
+test = false
+bench = false
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+cortex-m = "0.7.4"
+cortex-m-rt = "0.7.1"
+stm32h7xx-hal = { version = "0.15.0", features = ["stm32h747cm7", "rt"] }
+rtt-target = { version = "0.4.0"}
+fugit = "0.3.5"
+nb = "1.0.0"
+ltc681x = "0.4.2"
