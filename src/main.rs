@@ -18,7 +18,7 @@ use stm32h7xx_hal::{pac, prelude::*, rcc,gpio::{Alternate, Pin}, time::Hertz,spi
 pub use rtt_target::{rprintln as log, rtt_init_print as log_init};
 use ltc681x::config::Configuration;
 
-use ltc681x::ltc6811::CellSelection;
+use ltc681x::ltc6811::{CellSelection,GPIOSelection};
 use ltc681x::monitor::{ADCMode, LTC681X, LTC681XClient, PollClient};
 
 /* Define processor frequency */
@@ -101,8 +101,8 @@ fn main() -> ! {
 
 
     // LTC6811 device
-    let mut client = LTC681X::ltc6811(spi_bus, cs_pin,delay)
-        .enable_sdo_polling();
+    let mut client: LTC681X<spi::Spi<pac::SPI5, spi::Enabled>, Pin<'K', 1, stm32h7xx_hal::gpio::Output>, ltc681x::monitor::PLADCPolling, ltc681x::ltc6811::LTC6811, 2, stm32h7xx_hal::delay::Delay> = LTC681X::ltc6811(spi_bus, cs_pin,delay)
+        .enable_pladc_polling();
 
     let mut config: Configuration = Configuration::default();
 
@@ -117,10 +117,11 @@ fn main() -> ! {
     config.set_uv_comp_voltage(3_000_000).unwrap();
     config.enable_reference_power();
     config.disable_discharge_timer();
+    let config2 = config.clone();
 
     let _ = client.wake_up();
 
-    client.write_configuration([config]).unwrap();
+    client.write_configuration([config,config2]).unwrap();
 
     let _ = client.wake_up();
 
@@ -142,10 +143,7 @@ fn main() -> ! {
         }
     }
 
-    let _ = client.wake_up();
 
-    // Starts conversion for cell group 1
-    let _rst = client.start_conv_cells(ADCMode::Normal, CellSelection::All, true);
 
     // Configure PK5 as output.
     let _led = gpio_k.pk5.into_push_pull_output();
@@ -156,36 +154,66 @@ fn main() -> ! {
 
 
     loop {
-        // Poll ADC status
-        while !client.adc_ready().unwrap() {
-            // Conversion is not done yet
-            log!("Waiting for LTC6812");
-            //delay2.delay_ms(10_u16);
-        }
 
+        let _ = client.wake_up();
+        // Starts conversion for cell group 1
+        let _rst = client.start_conv_cells(ADCMode::Normal, CellSelection::All, true);
+        log!("Poll ADC Ready");
+        let _ = client.adc_ready();
         let _ = client.wake_up();
         // Returns the value of cell group A. In case of LTC613: cell 1, 7 and 13
         let volts = client.read_voltages(CellSelection::All).unwrap();
-        for i in 0..12{
-            log!("volts{}: {:?}",i,volts[0][0].voltage);
+        for c in 0..2{
+            for i in 0..12{
+                log!("ic{} cell{} voltage: {:?}",c,i,volts[c][i].voltage);
+            }
         }
-        log!("volts: {:?}",volts[0][0].voltage);
+        log!("Wakeup");
         let _ = client.wake_up();
-        let rega = client.read_register(ltc681x::ltc6811::Register::ConfigurationA);
-        match rega{
-            Ok(array) =>{
-                log!("RegA0 : 0x{:X}",array[0][0].to_be_bytes()[1]);
-                log!("RegA1 : 0x{:X}",array[0][0].to_be_bytes()[0]);
-                log!("RegA2 : 0x{:X}",array[0][1].to_be_bytes()[1]);
-                log!("RegA3 : 0x{:X}",array[0][2].to_be_bytes()[0]);
-                log!("RegA4 : 0x{:X}",array[0][2].to_be_bytes()[1]);
-                log!("RegA5 : 0x{:X}",array[0][2].to_be_bytes()[0]);
+        let _ = client.start_conv_gpio(ADCMode::Normal, GPIOSelection::All);
+        
+        let reg_aux_a = client.read_register(ltc681x::ltc6811::Register::AuxiliaryA).unwrap();
+        let reg_aux_b = client.read_register(ltc681x::ltc6811::Register::AuxiliaryB).unwrap();
+        let mut gpio: [[u16;6];2] = [[0;6];2];
+        for ic in 0..2{
+            let mut ccat: [u16;6] = [0;6];
+            ccat[..3].copy_from_slice(&reg_aux_a[ic]);
+            ccat[3..].copy_from_slice(&reg_aux_b[ic]);
+            gpio[ic] = ccat;
+        }
 
-            }
-            Err(err) =>{
-                log!("Error Read ConfigA: {:?}",err);
+        for c in 0..2{
+            for i in 0..6{
+                log!("ic{} gpio{} voltage: {:?}",c,i,gpio[c][i]);
             }
         }
+
+
+
+        let array1: [u16; 3] = [1, 2, 3];
+        let array2: [u16; 3] = [4, 5, 6];
+
+        let mut concatenated_array: [u16; 6] = [0; 6]; // Initialize a new array with the combined size
+
+        concatenated_array[..3].copy_from_slice(&array1); // Copy elements from array1
+        concatenated_array[3..].copy_from_slice(&array2); // Copy elements from array2
+    
+            // log!("Read Registers");
+        // let rega = client.read_register(ltc681x::ltc6811::Register::ConfigurationA);
+        // match rega{
+        //     Ok(array) =>{
+        //         log!("RegA0 : 0x{:X}",array[0][0].to_be_bytes()[1]);
+        //         log!("RegA1 : 0x{:X}",array[0][0].to_be_bytes()[0]);
+        //         log!("RegA2 : 0x{:X}",array[0][1].to_be_bytes()[1]);
+        //         log!("RegA3 : 0x{:X}",array[0][2].to_be_bytes()[0]);
+        //         log!("RegA4 : 0x{:X}",array[0][2].to_be_bytes()[1]);
+        //         log!("RegA5 : 0x{:X}",array[0][2].to_be_bytes()[0]);
+
+        //     }
+        //     Err(err) =>{
+        //         log!("Error Read ConfigA: {:?}",err);
+        //     }
+        // }
 
 
         status_pin.toggle();
