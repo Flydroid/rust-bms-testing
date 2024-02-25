@@ -5,6 +5,7 @@
 
 mod sys; // imports the sys module
 mod panic; //imports the panic handler
+mod thermistor;
 
 #[macro_use(block)]
 extern crate nb;
@@ -23,6 +24,8 @@ use ltc681x::monitor::{ADCMode, LTC681X, LTC681XClient, PollClient};
 
 /* Define processor frequency */
 pub const CORE_FREQUENCY: Hertz = Hertz::from_raw(480_000_000);
+
+use thermistor::Thermistor;
 
 
 #[entry]
@@ -148,7 +151,17 @@ fn main() -> ! {
     // Configure PK5 as output.
     let _led = gpio_k.pk5.into_push_pull_output();
 
-
+    let ntc_d: Thermistor = Thermistor::new(
+        //25_f32,            // 25°C
+        3_f32,      // 3V
+        10_f32,        // 10k resistor for voltage bridge
+        //3380_u16,       // Thermistor constant
+        -20_f32,    // lower temp limit
+        80_f32,   // upper temp limit
+        1_f32,  // temperature increment in LUT
+        101_u16,    // length of LUT
+        thermistor::LUT_NTU_CELL_MODULE_D // pointer to lut
+    );
     
 
 
@@ -171,34 +184,23 @@ fn main() -> ! {
         log!("Wakeup");
         let _ = client.wake_up();
         let _ = client.start_conv_gpio(ADCMode::Normal, GPIOSelection::All);
-        
+           
         let reg_aux_a = client.read_register(ltc681x::ltc6811::Register::AuxiliaryA).unwrap();
         let reg_aux_b = client.read_register(ltc681x::ltc6811::Register::AuxiliaryB).unwrap();
-        let mut gpio: [[u16;6];2] = [[0;6];2];
+        let mut gpio_voltage: [[u16;6];2] = [[0;6];2];
         for ic in 0..2{
             let mut ccat: [u16;6] = [0;6];
             ccat[..3].copy_from_slice(&reg_aux_a[ic]);
             ccat[3..].copy_from_slice(&reg_aux_b[ic]);
-            gpio[ic] = ccat;
+            gpio_voltage[ic] = ccat;
         }
 
         for c in 0..2{
-            for i in 0..6{
-                log!("ic{} gpio{} voltage: {:?}",c,i,gpio[c][i]);
+            for i in 0..5{
+                log!("ic{} gpio{} temps: {:?}",c,i,ntc_d.convert_volt_to_temp(gpio_voltage[c][i]));
             }
         }
-
-
-
-        let array1: [u16; 3] = [1, 2, 3];
-        let array2: [u16; 3] = [4, 5, 6];
-
-        let mut concatenated_array: [u16; 6] = [0; 6]; // Initialize a new array with the combined size
-
-        concatenated_array[..3].copy_from_slice(&array1); // Copy elements from array1
-        concatenated_array[3..].copy_from_slice(&array2); // Copy elements from array2
-    
-            // log!("Read Registers");
+        // log!("Read Registers");
         // let rega = client.read_register(ltc681x::ltc6811::Register::ConfigurationA);
         // match rega{
         //     Ok(array) =>{
